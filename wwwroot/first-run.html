@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>依依灵球 · 开始使用</title>
+<!--
+  首次启动引导页（ApiKey 未配置时由 ApiKeySetupForm 的 WebView2 架构承载）。
+  建议宿主窗口：无边框圆角 14px，ClientSize 约 490x630（与本页自然内容高度一致），背景 #f4f6fb，外置阴影同 DropShadowWindow。
+
+  与 C# 的消息桥约定（确认后接入，本文件 JS 已预留）：
+    JS -> C#  { type: "openExternal", url: "..." }   用系统默认浏览器打开平台链接
+    JS -> C#  { type: "save", apiKey: "...", baseUrl: "..." }   保存并关闭引导窗
+    JS -> C#  { type: "quit" }                        「暂不使用」退出应用
+-->
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --brand: #4A7CFF;
+    --brand-dim: #3A66E0;
+    --bg: #f4f6fb;
+    --panel: #ffffff;
+    --line: #e8ecf3;
+    --text: #2b2f3a;
+    --dim: #8a90a0;
+  }
+  html, body { height: 100%; }
+  body {
+    font: 13px/1.6 "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+    user-select: none;
+    animation: pageIn .28s ease;
+  }
+  @keyframes pageIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  #wrap {
+    height: 100vh;
+    padding: 26px 32px 20px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ---------- 头部品牌 ---------- */
+  #head {
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 14px;
+  }
+  .logo {
+    width: 42px; height: 42px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 3px 10px rgba(74,124,255,.30);
+  }
+  .logo svg { width: 42px; height: 42px; border-radius: 12px; }
+  #head .t { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+  #head .s { font-size: 12px; color: var(--dim); margin-top: 1px; }
+
+  /* ---------- 说明卡 ---------- */
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(70,90,160,.05);
+    padding: 12px 16px;
+    margin-bottom: 12px;
+  }
+  #intro { font-size: 12.5px; color: #4a5060; }
+  #intro b { color: var(--text); }
+  #intro .feats { color: var(--dim); }
+
+  /* ---------- 三步引导 ---------- */
+  .steps { list-style: none; }
+  .steps li {
+    display: flex; align-items: flex-start; gap: 10px;
+    padding: 4px 0;
+    font-size: 12.5px; color: #4a5060;
+  }
+  .steps .n {
+    flex-shrink: 0;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: rgba(74,124,255,.12);
+    color: var(--brand-dim);
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 3px;
+  }
+
+  /* ---------- 平台链接按钮 ---------- */
+  #btn-open-platform {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%;
+    margin-top: 10px;
+    padding: 9px 0;
+    border: 1px solid rgba(74,124,255,.30);
+    border-radius: 9px;
+    background: rgba(74,124,255,.07);
+    color: var(--brand-dim);
+    font: 600 13px "Microsoft YaHei UI", sans-serif;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background .15s, color .15s;
+  }
+  #btn-open-platform:hover { background: var(--brand); border-color: var(--brand); color: #fff; }
+  #btn-open-platform svg { width: 15px; height: 15px; }
+  .plat-url { font-size: 11px; color: var(--dim); margin-top: 6px; text-align: center; }
+
+  /* ---------- 表单 ---------- */
+  .field { margin-top: 12px; }
+  .field label {
+    display: block;
+    font-size: 12px; color: #3c4250;
+    margin-bottom: 5px;
+  }
+  .field label em { font-style: normal; color: var(--dim); font-size: 11px; }
+  .input-wrap { position: relative; }
+  .tin {
+    width: 100%;
+    padding: 8px 36px 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fbfcfe;
+    color: var(--text);
+    font: 12.5px Consolas, monospace;
+    outline: none;
+    user-select: text;
+  }
+  .tin:focus { border-color: var(--brand); background: #fff; }
+  #btn-eye {
+    position: absolute; right: 6px; top: 50%;
+    transform: translateY(-50%);
+    width: 24px; height: 24px;
+    border: none; background: transparent;
+    color: var(--dim); cursor: pointer;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  #btn-eye:hover { background: #f2f5fb; color: var(--text); }
+  #btn-eye svg { width: 15px; height: 15px; display: block; margin: auto; }
+
+  /* ---------- 底部按钮 ---------- */
+  #foot {
+    margin-top: auto;
+    display: flex; align-items: center; justify-content: space-between;
+    padding-top: 14px;
+  }
+  #btn-save {
+    padding: 9px 30px;
+    border: 1px solid var(--brand);
+    border-radius: 9px;
+    background: var(--brand); color: #fff;
+    font: 700 13px "Microsoft YaHei UI", sans-serif;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(74,124,255,.30);
+  }
+  #btn-save:hover { background: var(--brand-dim); border-color: var(--brand-dim); }
+  #btn-quit {
+    border: none; background: transparent;
+    color: var(--dim);
+    font: 12px "Microsoft YaHei UI", sans-serif;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+  #btn-quit:hover { background: #ffecec; color: #e05a55; }
+
+  /* ---------- Toast ---------- */
+  #toast {
+    position: fixed; left: 50%; top: 22px;
+    transform: translateX(-50%) translateY(-8px);
+    background: #fff;
+    border: 1px solid rgba(74,124,255,.35);
+    color: var(--text);
+    padding: 8px 18px;
+    border-radius: 999px;
+    box-shadow: 0 6px 20px rgba(60,80,160,.16);
+    font-size: 12.5px;
+    opacity: 0; pointer-events: none;
+    transition: all .25s ease;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="head">
+    <div class="logo"><svg viewBox="0 0 56 56" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="ballG" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#4A7CFF"/><stop offset=".5" stop-color="#8A5CFF"/><stop offset="1" stop-color="#38D6FF"/>
+      </linearGradient></defs>
+      <circle cx="28" cy="28" r="22" fill="url(#ballG)"/>
+      <g stroke="#fff" stroke-width="4" stroke-linecap="round">
+        <line x1="12" y1="21" x2="12" y2="35"/><line x1="20" y1="17" x2="20" y2="39"/>
+        <line x1="28" y1="14" x2="28" y2="42"/><line x1="36" y1="17" x2="36" y2="39"/>
+        <line x1="44" y1="21" x2="44" y2="35"/>
+      </g>
+    </svg></div>
+    <div>
+      <div class="t">欢迎使用依依灵球</div>
+      <div class="s">最后一步：填入 API Key，即可开始使用</div>
+    </div>
+  </div>
+
+  <div class="card" id="intro">
+    只需一个 <b>API Key</b> 即可使用全部功能：<span class="feats">截图翻译 · 划词对话 · 语音唤醒 · 记忆与知识库</span>。
+    服务地址与模型已内置直连，无需安装任何本地服务。
+  </div>
+
+  <div class="card">
+    <ul class="steps">
+      <li><span class="n">1</span><span>点击下方按钮，打开平台的 API-KEY 管理页（将使用系统默认浏览器打开）</span></li>
+      <li><span class="n">2</span><span>注册 / 登录后，在页面中创建一个 API Key 并复制</span></li>
+      <li><span class="n">3</span><span>复制 Key，粘贴到下方输入框，点「保存并开始使用」</span></li>
+    </ul>
+
+    <!-- 正式版：postMessage({type:'openExternal'}) 由 C# 用默认浏览器打开；此处 a 标签便于纯浏览器预览 -->
+    <a id="btn-open-platform"
+       href="https://platform.qianwenai.com/home/api-keys"
+       target="_blank"
+       rel="noopener noreferrer"
+       onclick="return openPlatform(event)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        <polyline points="15 3 21 3 21 9"/>
+        <line x1="10" y1="14" x2="21" y2="3"/>
+      </svg>
+      打开平台获取 API Key
+    </a>
+    <div class="plat-url">https://platform.qianwenai.com/home/api-keys</div>
+  </div>
+
+  <div class="card">
+    <div class="field">
+      <label for="apiKey">API Key <em>（sk- 开头，仅保存在本机）</em></label>
+      <div class="input-wrap">
+        <input class="tin" id="apiKey" type="password" placeholder="粘贴你的 API Key" spellcheck="false" autocomplete="off" />
+        <button id="btn-eye" type="button" title="显示 / 隐藏">
+          <svg id="eye-open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+          </svg>
+          <svg id="eye-closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="field">
+      <label for="baseUrl">服务地址 <em>（已内置，一般无需修改）</em></label>
+      <input class="tin" id="baseUrl" type="text" spellcheck="false" autocomplete="off"
+             value="https://maas.qianwenaiapi.com/compatible-mode/v1" />
+    </div>
+  </div>
+
+  <div id="foot">
+    <button id="btn-save" type="button">保存并开始使用</button>
+    <button id="btn-quit" type="button">暂不使用（退出）</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  var API_PLATFORM_URL = 'https://platform.qianwenai.com/home/api-keys';
+
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.classList.remove('show'); }, 2200);
+  }
+
+  // 正式架构：WebView2 内通过 postMessage 让 C# 用系统默认浏览器打开；
+  // 纯浏览器预览时退化为新标签页。
+  function openPlatform(ev) {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: 'openExternal', url: API_PLATFORM_URL });
+      return false; // 阻止 a 标签默认导航
+    }
+    return true;    // 预览环境：正常 target=_blank
+  }
+
+  // 显示 / 隐藏 Key（切换睁眼 / 闭眼图标）
+  document.getElementById('btn-eye').addEventListener('click', function () {
+    var inp = document.getElementById('apiKey');
+    var show = inp.type === 'password';
+    inp.type = show ? 'text' : 'password';
+    document.getElementById('eye-open').style.display = show ? 'none' : 'block';
+    document.getElementById('eye-closed').style.display = show ? 'block' : 'none';
+  });
+
+  // 保存：正式架构 postMessage({type:'save', apiKey, baseUrl})，由 C# 校验并写 config.json
+  document.getElementById('btn-save').addEventListener('click', function () {
+    var key = document.getElementById('apiKey').value.trim();
+    if (!key) { toast('请先粘贴 API Key（可按上方步骤免费获取）'); document.getElementById('apiKey').focus(); return; }
+    var baseUrl = document.getElementById('baseUrl').value.trim();
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: 'save', apiKey: key, baseUrl: baseUrl });
+    } else {
+      toast('原型预览：确认后将接入保存逻辑');
+    }
+  });
+
+  // 暂不使用：正式架构 postMessage({type:'quit'})
+  document.getElementById('btn-quit').addEventListener('click', function () {
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage({ type: 'quit' });
+    } else {
+      toast('原型预览：确认后将接入退出逻辑');
+    }
+  });
+
+  // C# → JS：宿主把当前配置的服务地址发过来预填（替代原 WinForms 的 AppConfig 预填）
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.addEventListener('message', function (e) {
+      var d = e.data || {};
+      if (d.type === 'config' && d.baseUrl) document.getElementById('baseUrl').value = d.baseUrl;
+    });
+    window.chrome.webview.postMessage({ type: 'ready' });
+  }
+
+  // 视口自适应：把内容自然高度上报给宿主（先把 wrap 临时设为 auto 量真实高度），
+  // 宿主按 CSS 视口/窗口逻辑尺寸的实测比例，把窗口调成刚好容纳内容（不同 DPI 缩放下比例不同）。
+  // 关键：窗口尺寸变化后由 resize 事件触发重新上报——resize 在渲染进程真正拿到新视口后才触发，
+  // 避免宿主改完尺寸立刻回读导致的"旧视口"竞态（会把窗口越调越大）。
+  function reportMetrics() {
+    if (!(window.chrome && window.chrome.webview)) return;
+    var wrap = document.getElementById('wrap');
+    var h = wrap.style.height;
+    wrap.style.height = 'auto';
+    var contentH = wrap.offsetHeight;
+    wrap.style.height = h;
+    window.chrome.webview.postMessage({
+      type: 'viewport',
+      w: window.innerWidth,
+      h: window.innerHeight,
+      contentH: contentH
+    });
+  }
+  window.addEventListener('resize', reportMetrics);
+  reportMetrics();
+
+  // 键盘：Enter 保存，Esc 暂不使用（与原 WinForms 引导窗行为一致）
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('btn-save').click();
+    else if (e.key === 'Escape') document.getElementById('btn-quit').click();
+  });
+</script>
+</body>
+</html>

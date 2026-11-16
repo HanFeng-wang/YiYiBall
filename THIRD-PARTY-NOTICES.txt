@@ -1,0 +1,67 @@
+依依灵球 YiYi Ball 第三方组件声明（THIRD-PARTY NOTICES）
+=============================================================
+
+本软件包含下列第三方组件。各组件版权归其各自版权人所有，本声明仅为汇总指引；
+各组件的完整许可证文本以其官方仓库/发布页为准（已附来源）。
+
+一、.NET NuGet 组件（随主程序分发）
+--------------------------------------------------------------------------------
+| 组件                     | 版本    | 许可证      | 版权 / 来源                              |
+|--------------------------|---------|-------------|------------------------------------------|
+| Microsoft.Web.WebView2   | 1.0.x   | BSD-3-Clause| (c) Microsoft Corporation — https://www.nuget.org/packages/Microsoft.Web.WebView2 |
+| NAudio                   | 2.2.1   | MIT         | (c) Mark Heath — https://www.nuget.org/packages/NAudio |
+| System.Speech            | 8.0.x   | MIT         | (c) Microsoft / .NET Foundation — https://www.nuget.org/packages/System.Speech |
+| Microsoft.Data.Sqlite    | 8.0.x   | MIT         | (c) Microsoft（依赖的 e_sqlite3 为公有领域）— https://www.nuget.org/packages/Microsoft.Data.Sqlite |
+| DocumentFormat.OpenXml   | 3.0.x   | MIT         | (c) Microsoft — https://www.nuget.org/packages/DocumentFormat.OpenXml |
+| PdfPig                   | 0.1.16  | Apache-2.0  | (c) UglyToad — https://www.nuget.org/packages/PdfPig |
+| Microsoft.Playwright     | 1.64.x  | MIT         | (c) Microsoft — https://www.nuget.org/packages/Microsoft.Playwright |
+
+二、浏览器组件
+--------------------------------------------------------------------------------
+Chromium（随安装包内置，用于浏览器自动化）
+  许可证：BSD-3 系开源许可，内含大量第三方软件，其完整授权声明见安装目录
+  browsers\chromium-*\ 内的 LICENSE 文件（chrome://credits 同源清单）。
+  来源：https://www.chromium.org/Home/chromium-licenses/
+
+三、语音链路组件（随安装包内置）
+--------------------------------------------------------------------------------
+sherpa-onnx 运行时（含 .NET 绑定 org.k2fsa.sherpa.onnx 2.0.1 与 PyInstaller 版）
+  许可证：Apache-2.0 — (c) k2-fsa 项目组
+  来源：https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE
+
+语音唤醒（KWS）模型 sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20
+  许可证：Apache-2.0（随 k2-fsa 官方 kws-models 发布）
+  来源：https://github.com/k2-fsa/sherpa-onnx/releases/tag/kws-models
+
+ZipVoice 语音克隆模型 sherpa-onnx-zipvoice-distill-int8-zh-en-emilia + Vocos vocoder
+  许可证：Apache-2.0 — 来源：https://github.com/k2-fsa/ZipVoice/blob/master/LICENSE
+  重要：该模型基于 Emilia 数据集（CC BY-NC 4.0，仅限非商业用途）训练，
+  因此本软件包含的语音克隆功能仅限非商业用途。
+  来源：https://opendatalab.com/Amphion/Emilia
+
+edge-tts（Python 库，在线 TTS，随 tts_server 打包）
+  许可证：LGPL-3.0 — (c) rany2
+  来源：https://github.com/rany2/edge-tts/blob/master/LICENSE
+  重要：该库调用 Microsoft Edge「大声朗读」相关接口，并非微软官方开放 API，
+  功能可能随微软侧调整而失效。
+
+tts_server 内其他 Python 库（PyInstaller 打包，均为宽松许可）：
+  PyInstaller（GPL-2.0-or-later + Bootloader 例外，允许自由分发打包产物）
+    — https://github.com/pyinstaller/pyinstaller/blob/develop/COPYING.txt
+  numpy（BSD-3-Clause）、Pillow（HPND / MIT-CMU）、lxml（BSD-3-Clause）、
+  cryptography（Apache-2.0 OR BSD-3-Clause）、aiohttp（Apache-2.0）、
+  pydantic（MIT）、python-soundfile（BSD-3-Clause）、httpx/h2/httpcore/aiohttp 系（BSD/Apache-2.0）
+
+四、音色参考音频
+--------------------------------------------------------------------------------
+tools\tts\tts_server\ref24.wav（音色克隆参考音频）：使用前须确认您对该声音素材
+拥有权利或已获得权利人书面授权（《中华人民共和国民法典》第一千零二十三条：
+对自然人声音的保护，参照适用肖像权保护的有关规定）。未经授权克隆他人声音
+属于侵权行为。
+
+五、运行时环境
+--------------------------------------------------------------------------------
+.NET 8 运行时（自包含分发）：MIT — (c) .NET Foundation and Contributors
+  https://github.com/dotnet/runtime/blob/main/LICENSE.TXT
+Windows SAPI 语音引擎与 WebView2 运行时：微软 Windows/Edge 组件，
+  依 Windows 操作系统许可随系统提供，本软件不对其进行再分发。

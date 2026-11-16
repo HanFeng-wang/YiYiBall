@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>依依灵球 YiYi Ball</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div id="word" class="word">选中文字后将出现在这里</div>
+    <div id="wave" class="wave hidden" title="响应中">
+      <i></i><i></i><i></i><i></i><i></i>
+    </div>
+    <button id="btn-speak" class="txt-btn">发音</button>
+    <button id="btn-history" class="txt-btn">历史</button>
+    <button id="btn-settings" class="txt-btn">设置</button>
+    <button id="btn-close" class="txt-btn close">关闭</button>
+  </header>
+
+  <main id="chat-view">
+    <div id="chat"></div>
+    <form id="input-row" autocomplete="off">
+      <input id="input" type="text" placeholder="针对这个词继续提问…" />
+      <button id="btn-send" type="submit">发送</button>
+    </form>
+  </main>
+
+  <main id="history-view" class="hidden">
+    <div id="history-search-row">
+      <input id="history-search" type="text" placeholder="搜索记录…" />
+    </div>
+    <div id="history-list"></div>
+  </main>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

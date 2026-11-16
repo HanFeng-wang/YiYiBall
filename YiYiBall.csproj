@@ -1,0 +1,78 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- TFM 带 Windows SDK 版本：Windows.Devices.Radios（WiFi/蓝牙开关）需要 WinRT 投影 -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>YiYiBall</AssemblyName>
+    <RootNamespace>ScreenTranslator</RootNamespace>
+    <ApplicationIcon>yiyiball.ico</ApplicationIcon>
+    <AssemblyTitle>依依灵球 YiYi Ball</AssemblyTitle>
+    <Product>依依灵球 YiYi Ball</Product>
+    <Version>1.0.0</Version>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <UseAppHost>true</UseAppHost>
+    <!-- MSB3277：WebView2 Wpf 程序集按 WindowsBase 5.0 编译，net8.0-windows 提供的是 4.0（强名兼容），运行无影响，豁免 -->
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.*" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="2.0.1" />
+    <PackageReference Include="System.Speech" Version="8.0.*" />
+    <!-- 记忆与知识库（方案 §10）：SQLite 单文件存储 + docx/pdf 抽文本 -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.*" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.0.*" />
+    <!-- PDF 抽文本：官方 PdfPig（Apache-2.0，UglyToad 官方发布）。勿改回 UglyToad.PdfPig custom 版（第三方上传、包内无许可证，开源不合规） -->
+    <PackageReference Include="PdfPig" Version="0.1.16" />
+    <!-- 真浏览器自动化（方案 §11.1）：受控 Chromium，页面理解用文本快照 -->
+    <PackageReference Include="Microsoft.Playwright" Version="1.64.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 开源合规：第三方组件许可声明随程序分发（安装包也会带上） -->
+    <Content Include="THIRD-PARTY-NOTICES.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="wwwroot\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- 悬浮球静态底图（只打包 base 底图，不打包 assets/balls 下其他产物） -->
+    <Content Include="assets\balls\*base*.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- 语音模式提示音（落地·果冻弹，tools/sfx/render_drip.py 渲染） -->
+    <Content Include="assets\sounds\*.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <None Update="config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <!-- 语音唤醒（本地 KWS 模型 + 词表）：随安装包内置，无需外部服务 -->
+    <Content Include="models\sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20\**\*"
+             Exclude="models\sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20\test_wavs\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="tools\kws\keywords.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- 本地 TTS 兜底（ZipVoice int8 + vocoder + 英文词表）：随安装包内置，edge 在线语音失败时离线克隆 -->
+    <Content Include="models\sherpa-onnx-zipvoice-distill-int8-zh-en-emilia\**\*"
+             Exclude="models\sherpa-onnx-zipvoice-distill-int8-zh-en-emilia\test_wavs\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="models\vocos_24khz.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="models\lexicon-en-us.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+</Project>

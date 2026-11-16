@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>voice-pill</title>
+<style>
+  /* ===== 球下白条内容层 =====
+     白条本体由 WinForms 窗体承担（白色 + 圆角 Region + DropShadowWindow 外挂阴影，
+     与主面板/设置窗同源）；WebView2 背景为不透明白。HTML 只负责排版：状态圆点 + 文字。 */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;          /* 白底由 WebView2 DefaultBackgroundColor 提供 */
+    overflow: hidden; cursor: default;
+    font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+    user-select: none;
+  }
+  #pill {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center; gap: 9px;
+    color: #292e36;
+  }
+  #text {
+    font-size: 13px; letter-spacing: .5px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* 状态圆点：颜色随状态（C# 下发） */
+  #pill .dot {
+    flex: 0 0 8px; width: 8px; height: 8px; border-radius: 50%;
+    background: #16a34a;
+  }
+  #pill .dot.pulse { animation: dotPulse 1.1s ease-in-out infinite; }
+  @keyframes dotPulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
+</style>
+</head>
+<body>
+  <div id="pill">
+    <span class="dot" id="dot"></span><span id="text"></span>
+  </div>
+<script>
+  const dot  = document.getElementById('dot');
+  const text = document.getElementById('text');
+
+  // C# → JS：{ text, color, pulse }（显隐淡入淡出由窗体 Opacity 承担）
+  window.chrome.webview.addEventListener('message', ev => {
+    const m = ev.data || {};
+    if (typeof m.text === 'string') text.textContent = m.text;
+    if (typeof m.color === 'string') dot.style.background = m.color;
+    dot.classList.toggle('pulse', !!m.pulse);
+  });
+</script>
+</body>
+</html>

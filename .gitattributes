@@ -1,0 +1,1 @@
+models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/decoder.int8.onnx filter=lfs diff=lfs merge=lfs -text

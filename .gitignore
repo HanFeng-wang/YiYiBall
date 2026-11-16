@@ -1,0 +1,52 @@
+# ---------- 构建产物 ----------
+bin/
+obj/
+publish/
+installer/
+
+# ---------- 运行期数据（含日志、记忆库、用户数据） ----------
+data/
+
+# ---------- 敏感配置（含 API Key，严禁入库） ----------
+config.json
+
+# ---------- 悬浮球素材：仅入库运行时加载的两张底图 ----------
+# 452 张 idle/ripple 动画帧为开发期预渲染产物，运行时不引用（见 AssistantBalls.cs GetBase）
+assets/balls/*
+!assets/balls/main_base.png
+!assets/balls/assist_base.png
+
+# ---------- 未授权声音素材（开源合规，见 LICENSE 第二条 / THIRD-PARTY-NOTICES 第四节） ----------
+# 音色克隆参考音频与商用 TTS 音色样音：授权确认前不得随源码分发
+tools/tts/ref.wav
+tools/tts/ref24.wav
+tools/tts/ref.txt
+assets/voices/
+
+# ---------- 模型：仅入库运行时必需的 int8 推理模型（编译后即完整可用） ----------
+# 开发用 fp32 模型与下载用 tar 包不入库；模型来源见 THIRD-PARTY-NOTICES.txt 第三节
+models/*
+!models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/
+models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20/test_wavs/
+!models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/
+models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia/test_wavs/
+!models/vocos_24khz.onnx
+!models/lexicon-en-us.txt
+
+# ---------- 开发者工具与大体积中间产物 ----------
+tools/tts/build/
+tools/tts/dist/
+tools/tts/__pycache__/
+tools/tts/*.log
+tools/tts/test_wake.wav
+tools/kws/*
+!tools/kws/keywords.txt
+browsers/
+
+# ---------- 开发期文档 / 测试 / 预览产物（不入库） ----------
+docs/
+tests/
+ball-preview.html
+ui-preview.html
+export.html
+启动.bat
