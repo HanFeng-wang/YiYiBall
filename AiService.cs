@@ -571,7 +571,9 @@ public sealed class AiService
             messages = msgs.Select(m => new { role = m.Item1, content = m.Item2 })
         };
         var msg = await PostMessageAsync(body, _cfg.IntentModel, ct);
-        var raw = (msg.GetProperty("content").GetString() ?? "").Trim().ToLowerInvariant();
+        var raw = (msg.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.String
+            ? content.GetString() ?? ""
+            : "").Trim().ToLowerInvariant();
         return raw.Contains("task") ? "task" : "chat";   // 容错：只认两个词
     }
 
@@ -580,8 +582,9 @@ public sealed class AiService
         IReadOnlyList<(string role, string content)> history, string text, CancellationToken ct = default)
     {
         const string sys = """
-            你是电脑操作任务规划器。根据用户指令输出一个 JSON 对象，格式二十二选一：
-            打开应用 {"action":"open_app","args":{"name":"应用名"}}；
+            你是电脑操作任务规划器。根据用户指令输出一个 JSON 对象，格式二十三选一：
+            打开应用（未知应用或只需启动） {"action":"open_app","args":{"name":"应用名"}}；
+            应用语义操作（优先用于打开/切到/置顶微信、抖音、优酷、QQ音乐、原神等已知日常应用，应用内搜索，按用户明确要求打开/播放搜索结果，查找联系人，发消息。只说搜索、没说打开或播放时用 search，绝不能自作主张用 search_play） {"action":"app_action","args":{"action":"open|activate|search|search_open|search_play|find_contact|send_message|focus_input","app":"应用名，发消息没说应用时默认微信","query":"应用内搜索词（否则为空串）","contact":"联系人（否则为空串）","message":"要发送的正文（否则为空串）","instruction":"让助手代写消息的要求（否则为空串）"}}；
             截图翻译 {"action":"screenshot_translate","args":{}}；
             在光标处输入或生成文字 {"action":"insert_text","args":{"text":"用户原话里说好的内容（没说则为空串）","instruction":"要生成什么内容的描述（用户直接给了内容则为空串）"}}；
             修改文字（润色/改写/翻译/替换） {"action":"edit_text","args":{"instruction":"改写要求","file":"用户提到的文件路径（没有则为空串）","line":行号数字（没提行号则为 0）}}；
@@ -636,12 +639,39 @@ public sealed class AiService
                 function = new
                 {
                     name = "open_app",
-                    description = "打开电脑上的应用程序",
+                    description = "启动一个应用，只负责启动。已知日常应用的打开/置前、应用内搜索、联系人操作优先用 app_action",
                     parameters = new
                     {
                         type = "object",
                         properties = new { name = new { type = "string", description = "应用名，如 微信、记事本" } },
                         required = new[] { "name" }
+                    }
+                }
+            },
+            new
+            {
+                type = "function",
+                function = new
+                {
+                    name = "app_action",
+                    description = "对日常桌面应用做语义化操作：打开并置前、在应用内搜索、按用户明确要求打开或播放第一条搜索结果、查找联系人和发送消息。" +
+                        "抖音/爱奇艺/优酷/腾讯视频/QQ音乐/网易云音乐/哔哩哔哩等客户端存在时优先在客户端搜索，未安装时自动回退到对应网页搜索。" +
+                        "原神、崩坏星穹铁道等游戏会自动处理启动器的“进入游戏/开始游戏/进入/启动”按钮并校验真正进入。" +
+                        "微信/QQ/钉钉/飞书发消息会先搜索并视觉确认联系人，再编辑输入框和发送；联系人无法确认时不会发送。" +
+                        "用户说“打开/切到/把某应用放到最顶层/在抖音搜什么/给某人发消息”时优先使用。登录二维码、扫码或密码仍需用户本人确认。",
+                    parameters = new
+                    {
+                        type = "object",
+                        properties = new
+                        {
+                            action = new { type = "string", description = "open|activate|search|search_open|search_play|find_contact|send_message|focus_input。打开或置前用 activate；只搜索、不打开也不播放用 search；用户明确说打开第一条结果才用 search_open；用户明确说播放才用 search_play；聊天应用找联系人用 find_contact；发消息用 send_message。没说播放绝不调用 search_play" },
+                            app = new { type = "string", description = "应用名，如 微信、抖音、优酷、原神、爱奇艺、QQ音乐。发消息没说应用时默认微信" },
+                            query = new { type = "string", description = "应用内搜索词，仅 search 使用" },
+                            contact = new { type = "string", description = "联系人、群聊或对方名称，聊天操作使用" },
+                            message = new { type = "string", description = "要发送的消息正文；用户直接说了内容就原样填入" },
+                            instruction = new { type = "string", description = "让助手代写消息的要求；只有用户没直接给出正文时才填，否则为空" }
+                        },
+                        required = new[] { "action" }
                     }
                 }
             },
@@ -1010,12 +1040,14 @@ public sealed class AiService
 
         var msgs = new List<(string, string)>();
         // 组合指令提示：一句话多个步骤时让模型按顺序给出全部 tool_calls（执行器依序执行）。
-        // 高频坑纠正：同一应用重复 open_app——打开后的界面操作应该用 screen_click
+        // 高频坑纠正：同一应用重复 open_app——已知应用走 app_action，未知界面才走视觉兜底
         msgs.Add(("system",
             "用户的一句话可能包含多个连续操作步骤（如「双击一下再按空格」「打开微信并登录」）。" +
             "需要多个工具调用时，在 tool_calls 里按执行顺序全部给出，不要只给第一个。" +
-            "同一个应用最多调用一次 open_app；应用打开后的界面内操作（登录、点按钮、输入）" +
-            "不要再用 open_app，改用 screen_click（如微信登录界面点「进入微信」）、press_keys 等完成。"));
+            "打开/切到/置顶已知应用、应用内搜索、搜索并打开或播放第一条结果、查找联系人、发消息，一律优先 app_action。" +
+            "app_action 是原子操作：例如 search_play 已经包含启动客户端、搜索、打开第一条结果和播放，send_message 已经包含置前、找联系人、编辑输入框和发送；" +
+            "不要再额外调用 open_app、press_keys、screen_click 重复这些步骤。只有目标应用不在配置里、需要在未知界面点某个文字按钮时，才用 screen_click。" +
+            "同一个应用最多调用一次 open_app；open_app 只用于单纯启动未知应用。"));
         if (!string.IsNullOrWhiteSpace(envContext)) msgs.Add(("system", envContext));
         msgs.AddRange(Tail(history, 8));
         msgs.Add(("user", text));
@@ -1125,7 +1157,20 @@ public sealed class AiService
         }
         await using var stream = await resp.Content.ReadAsStreamAsync(ct);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-        return doc.RootElement.GetProperty("choices")[0].GetProperty("message").Clone();
+        var root = doc.RootElement;
+
+        // OpenAI 兼容端点返回 choices[0].message；部分文本生成模型（如 tongyi-intent-detect-v3）
+        // 已切换为顶层 text，这里统一成 message，避免调用方按 key 取值时抛 KeyNotFoundException。
+        if (root.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array && choices.GetArrayLength() > 0 &&
+            choices[0].TryGetProperty("message", out var message))
+            return message.Clone();
+
+        if (root.TryGetProperty("text", out var text) && text.ValueKind == JsonValueKind.String)
+            return JsonSerializer.SerializeToElement(new { role = "assistant", content = text.GetString() ?? "" });
+
+        throw new Exception(
+            $"模型响应格式异常（{modelTag}）：缺少 choices[0].message 或 text。响应：{ExtractErrorBrief(root.GetRawText())}");
     }
 
     /// <summary>取 history 末尾 n 条（语音上下文只发最近几轮）。</summary>

@@ -31,27 +31,200 @@
     if (v) historySearch.blur();
   }
 
-  // ---------- Markdown 简易渲染（安全转义） ----------
+  // ---------- Markdown 渲染（代码块 / 表格 / 基础排版，安全转义） ----------
   function esc(s) {
     return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
-  function md(text) {
-    let h = esc(text);
-    h = h.replace(/```([\s\S]*?)```/g, (_, c) => "<pre><code>" + c.trim() + "</code></pre>");
-    h = h.replace(/`([^`]+)`/g, "<code>$1</code>");
-    h = h.replace(/^### (.*)$/gm, "<h3>$1</h3>");
-    h = h.replace(/^## (.*)$/gm, "<h2>$1</h2>");
-    h = h.replace(/^# (.*)$/gm, "<h1>$1</h1>");
-    h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    h = h.replace(/\*([^*]+)\*/g, "<em>$1</em>");
-    h = h.replace(/^(?:[-*] )(.*)$/gm, "<li>$1</li>");
-    h = h.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>");
-    h = h.replace(/^---+$/gm, "<hr/>");
-    h = h.split(/\n{2,}/).map(p =>
-      /^\s*<(h\d|ul|li|pre|hr)/.test(p) ? p : "<p>" + p.replace(/\n/g, "<br/>") + "</p>"
-    ).join("");
-    return h;
+
+  function inlineMd(s) {
+    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+    return s;
   }
+
+  function codeBlockHtml(block) {
+    const lang = esc(block.lang || "text");
+    const code = esc(block.code);
+    return (
+      '<div class="code-block">' +
+        '<div class="code-head">' +
+          '<span class="code-lang">' + lang + '</span>' +
+          '<div class="code-actions">' +
+            '<button type="button" class="code-btn" data-code-copy title="复制代码">' +
+              '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>' +
+              '<span>复制</span>' +
+            '</button>' +
+            '<button type="button" class="code-btn" data-code-download title="下载代码">' +
+              '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12"></path><path d="m7 10 5 5 5-5"></path><path d="M5 21h14"></path></svg>' +
+              '<span>下载</span>' +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+        '<pre class="code-body"><code>' + code + '</code></pre>' +
+      '</div>'
+    );
+  }
+
+  function splitTableRow(line) {
+    let s = line.trim();
+    if (s.startsWith("|")) s = s.slice(1);
+    if (s.endsWith("|")) s = s.slice(0, -1);
+    return s.split("|").map(c => c.trim());
+  }
+
+  function isTableSeparator(line) {
+    if (!line || line.indexOf("|") < 0) return false;
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every(c => /^:?-{3,}:?$/.test(c));
+  }
+
+  function tableHtml(header, aligns, rows) {
+    const alignAttr = i => aligns[i] ? ' style="text-align:' + aligns[i] + '"' : "";
+    const head = header.map((c, i) => "<th" + alignAttr(i) + ">" + inlineMd(c) + "</th>").join("");
+    const body = rows.map(r =>
+      "<tr>" + header.map((_, i) => "<td" + alignAttr(i) + ">" + inlineMd(r[i] || "") + "</td>").join("") + "</tr>"
+    ).join("");
+    return '<div class="table-wrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+  }
+
+  function md(text) {
+    const blocks = [];
+    let src = String(text || "").replace(/```([^\n`]*)\r?\n([\s\S]*?)(?:```|$)/g, (_, info, code) => {
+      const lang = (info || "").trim().split(/\s+/)[0] || "text";
+      const idx = blocks.length;
+      blocks.push({ lang: lang, code: code.replace(/\r\n/g, "\n").replace(/\n$/, "") });
+      return "\n\n@@CODEBLOCK" + idx + "@@\n\n";
+    });
+
+    const lines = esc(src).split(/\r?\n/);
+    const out = [];
+    let para = [];
+    const flushPara = () => {
+      if (!para.length) return;
+      out.push("<p>" + inlineMd(para.join("<br/>")) + "</p>");
+      para = [];
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (!trimmed) { flushPara(); continue; }
+
+      const codeMatch = trimmed.match(/^@@CODEBLOCK(\d+)@@$/);
+      if (codeMatch) {
+        flushPara();
+        out.push(trimmed);
+        continue;
+      }
+
+      if (trimmed.indexOf("|") >= 0 && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+        flushPara();
+        const header = splitTableRow(trimmed);
+        const sep = splitTableRow(lines[i + 1]);
+        const aligns = sep.map(c => c.startsWith(":") && c.endsWith(":") ? "center" : c.endsWith(":") ? "right" : "left");
+        const rows = [];
+        i += 2;
+        while (i < lines.length && lines[i].trim() && lines[i].indexOf("|") >= 0) {
+          rows.push(splitTableRow(lines[i]));
+          i++;
+        }
+        i--;
+        out.push(tableHtml(header, aligns, rows));
+        continue;
+      }
+
+      const heading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+      if (heading) {
+        flushPara();
+        const level = heading[1].length;
+        out.push("<h" + level + ">" + inlineMd(heading[2]) + "</h" + level + ">");
+        continue;
+      }
+
+      if (/^&gt;\s?/.test(trimmed)) {
+        flushPara();
+        const quote = [];
+        while (i < lines.length && /^&gt;\s?/.test(lines[i].trim())) {
+          quote.push(lines[i].trim().replace(/^&gt;\s?/, ""));
+          i++;
+        }
+        i--;
+        out.push("<blockquote>" + inlineMd(quote.join("<br/>")) + "</blockquote>");
+        continue;
+      }
+
+      if (/^---+$/.test(trimmed)) { flushPara(); out.push("<hr/>"); continue; }
+
+      if (/^[-*]\s+/.test(trimmed)) {
+        flushPara();
+        const items = [];
+        while (i < lines.length && /^[-*]\s+/.test(lines[i].trim())) {
+          items.push("<li>" + inlineMd(lines[i].trim().replace(/^[-*]\s+/, "")) + "</li>");
+          i++;
+        }
+        i--;
+        out.push("<ul>" + items.join("") + "</ul>");
+        continue;
+      }
+
+      para.push(line);
+    }
+    flushPara();
+
+    return out.join("").replace(/@@CODEBLOCK(\d+)@@/g,
+      (_, idx) => codeBlockHtml(blocks[Number(idx)] || { lang: "text", code: "" }));
+  }
+
+  async function writeClipboard(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (_) {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
+        return ok;
+      } catch (_) { return false; }
+    }
+  }
+
+  chat.addEventListener("click", async (e) => {
+    if (!(e.target instanceof Element)) return;
+    const copyBtn = e.target.closest("[data-code-copy]");
+    if (copyBtn) {
+      const code = copyBtn.closest(".code-block")?.querySelector("pre code")?.textContent || "";
+      const ok = await writeClipboard(code);
+      const label = copyBtn.querySelector("span");
+      if (label) {
+        const old = label.textContent;
+        label.textContent = ok ? "已复制" : "复制失败";
+        setTimeout(() => { label.textContent = old; }, 1200);
+      }
+      return;
+    }
+    const dlBtn = e.target.closest("[data-code-download]");
+    if (dlBtn) {
+      const block = dlBtn.closest(".code-block");
+      const code = block?.querySelector("pre code")?.textContent || "";
+      const lang = block?.querySelector(".code-lang")?.textContent.trim().toLowerCase() || "text";
+      const ext = ({ javascript: "js", typescript: "ts", csharp: "cs", "c#": "cs", python: "py",
+        shell: "sh", bash: "sh", json: "json", html: "html", css: "css", sql: "sql", java: "java",
+        cpp: "cpp", c: "c", go: "go", rust: "rs", text: "txt" })[lang] || "txt";
+      const url = URL.createObjectURL(new Blob([code], { type: "text/plain;charset=utf-8" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "code." + ext;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  });
 
   function addMsg(role, text) {
     const wrap = document.createElement("div");

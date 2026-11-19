@@ -36,9 +36,13 @@ public sealed class VoiceSession : IDisposable
     // 操作类指令关键词：命中直接走操作分支，不经 LLM 分类（防模糊口语被误判为 chat）
     // 「生成/输入/打字/润色/改写/帮我写/第N行」→ text 工具；「关机/定时/闹钟/音量/搜/窗口」→ run_command 与 §9 工具；
     // 「记住/记一下/存成技能/执行」→ 记忆与技能库（方案 §10.6）
-    private static readonly Regex TaskWord = new("打开|启动|开启|运行|帮我开|卸载|安装|截图|截屏|翻译一下|翻译这个|翻译屏幕|润色|改写|生成|输入文字|打字|帮我写|第.{1,4}行|光标|粘贴|替换成|查找|关机|重启|定时|闹钟|命令行|终端|音量|静音|搜一下|帮我搜|最小化|切到|记住|记一下|存成技能|执行|帮我找|找一下|点一下|播放|暂停|下一首|上一首|切歌|放首歌|放个音乐|开关|飞行模式|省电模式|无线网|蓝牙|全屏|空格|空白键|回车键|重命名|改名|按住|(?i:wifi)|(?i:f\\s*\\d{1,2})", RegexOptions.Compiled);
+    private static readonly Regex TaskWord = new("打开|启动|开启|运行|帮我开|卸载|安装|截图|截屏|翻译一下|翻译这个|翻译屏幕|润色|改写|生成|输入文字|打字|帮我写|第.{1,4}行|光标|粘贴|替换成|查找|搜索|关机|重启|定时|闹钟|命令行|终端|音量|静音|搜一下|帮我搜|最小化|切到|置顶|最顶层|放.{0,6}(前面|顶层)|记住|记一下|存成技能|执行|帮我找|找一下|点一下|播放|暂停|下一首|上一首|切歌|放首歌|放个音乐|开关|飞行模式|省电模式|无线网|蓝牙|全屏|空格|空白键|回车键|重命名|改名|按住|发消息|发给|发微信|给.{1,12}发|联系人|聊天记录|进入.{0,8}(游戏|原神|星穹铁道)|(?i:wifi)|(?i:f\\s*\\d{1,2})", RegexOptions.Compiled);
     // 「打开/启动」类指令：即使模型误选截图翻译也纠正为 open_app（见 ExecuteTaskAsync 守卫）
     private static readonly Regex OpenAppWord = new("打开|启动|开启|运行|帮我开", RegexOptions.Compiled);
+    // 应用语义操作：即使句子里有「打开」，也不要把发送消息/搜索播放误纠正成单纯 open_app
+    private static readonly Regex AppActionIntent = new("发消息|发给|发微信|给.{1,12}发|联系人|聊天记录|置顶|最顶层|放.{0,6}(前面|顶层)|搜索.{0,20}(打开|播放)|搜.{0,20}(打开|播放)|抖音|优酷|爱奇艺|腾讯视频|QQ音乐|网易云|哔哩哔哩|小红书|原神|星穹铁道", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex PlayIntent = new("播放|放一下|放出来|放给我|听一下|听听|开始听|开始看|看视频|听歌", RegexOptions.Compiled);
+    private static readonly Regex OpenResultIntent = new("第一条|第一个|首个|第一个结果|第一条结果|点开|打开.{0,8}结果|播放", RegexOptions.Compiled);
     // 澄清等待中用户改主意：取消待执行指令
     private static readonly Regex CancelWord = new("算了|不用了|不要了|取消", RegexOptions.Compiled);
 
@@ -513,7 +517,7 @@ public sealed class VoiceSession : IDisposable
         catch (Exception ex) { VoiceRecorder.Log($"[工具轮]「{text}」异常：{ex.Message}"); /* 失败 → toolName 仍空，走反问澄清 */ }
 
         // 守卫：明确「打开/启动」类指令但模型选错工具（如模糊指令被误路由到截图翻译）→ 纠正为 open_app
-        if (toolName == "screenshot_translate" && OpenAppWord.IsMatch(text))
+        if (toolName == "screenshot_translate" && OpenAppWord.IsMatch(text) && !AppActionIntent.IsMatch(text))
         {
             toolName = "open_app";
             argsJson = System.Text.Json.JsonSerializer.Serialize(
@@ -523,6 +527,54 @@ public sealed class VoiceSession : IDisposable
         // 规则兜底：「打开应用」但提不出应用名（如「帮我打开」「启动一个程序」）→ 反问澄清
         if (toolName == "open_app" && ExtractArgsName(argsJson).Length == 0)
             return (false, "", "open_app", "你想打开哪个应用呢？跟我说一下应用的名字。", false);
+
+        // 应用语义操作：缺关键参数先问清，绝不空发消息或对未知搜索结果乱点
+        if (toolName == "app_action")
+        {
+            string action = ExtractArgsString(argsJson, "action").ToLowerInvariant();
+            string app = ExtractArgsString(argsJson, "app");
+            string query = ExtractArgsString(argsJson, "query");
+            string contact = ExtractArgsString(argsJson, "contact");
+            string message = ExtractArgsString(argsJson, "message");
+            string instruction = ExtractArgsString(argsJson, "instruction");
+
+            // 硬规则：只说搜索就只搜索；明确说播放才播放，明确说第一条/点开才打开结果
+            if ((action is "search_play" or "search_and_play" or "play_result") && !PlayIntent.IsMatch(text))
+            {
+                action = OpenResultIntent.IsMatch(text) ? "search_open" : "search";
+                argsJson = System.Text.Json.JsonSerializer.Serialize(new { action, app, query });
+            }
+            else if ((action is "search_open" or "search_and_open" or "open_result") && !OpenResultIntent.IsMatch(text))
+            {
+                action = "search";
+                argsJson = System.Text.Json.JsonSerializer.Serialize(new { action, app, query });
+            }
+            else if (action == "search" && PlayIntent.IsMatch(text) && query.Length > 0)
+            {
+                action = "search_play";
+                argsJson = System.Text.Json.JsonSerializer.Serialize(new { action, app, query });
+            }
+            else if (action == "search" && OpenResultIntent.IsMatch(text) && query.Length > 0)
+            {
+                action = "search_open";
+                argsJson = System.Text.Json.JsonSerializer.Serialize(new { action, app, query });
+            }
+
+            if ((action is "search" or "search_open" or "search_and_open" or "open_result"
+                or "search_play" or "search_and_play" or "play_result") && query.Length == 0)
+                return (false, "", "app_action", "你想搜索什么内容呢？", false);
+            if (action is "send_message" or "send")
+            {
+                if (contact.Length == 0)
+                    return (false, "", "app_action", "要发给谁呢？跟我说一下联系人或群名。", false);
+                if (message.Length == 0 && instruction.Length == 0)
+                    return (false, "", "app_action", "要发什么内容呢？你可以直接说正文，也可以让我代你组织。", false);
+            }
+            if ((action is "find_contact" or "open_chat" or "search_contact") && contact.Length == 0)
+                return (false, "", "app_action", "你想找哪位联系人或群聊呢？", false);
+            if (app.Length == 0 && action is "" or "open" or "activate" or "bring_to_front" or "topmost" or "focus" or "login" or "search")
+                return (false, "", "app_action", "你想操作哪个应用呢？", false);
+        }
 
         if (toolName.Length == 0)
             return (false, "", "未识别",
@@ -592,12 +644,15 @@ public sealed class VoiceSession : IDisposable
     }
 
     /// <summary>从工具参数 JSON 里取 name 字段（取不到或为空返回空串）。</summary>
-    private static string ExtractArgsName(string argsJson)
+    private static string ExtractArgsName(string argsJson) => ExtractArgsString(argsJson, "name");
+
+    private static string ExtractArgsString(string argsJson, string key)
     {
         try
         {
             using var doc = JsonDocument.Parse(argsJson);
-            return doc.RootElement.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+            return doc.RootElement.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString() ?? "" : "";
         }
         catch { return ""; }
     }

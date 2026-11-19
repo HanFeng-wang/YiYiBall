@@ -16,7 +16,7 @@ namespace ScreenTranslator;
 /// save_memory / save_skill / run_skill（记忆与技能库，方案 §10）、
 /// find_file / open_found（文件搜索，§11.2）、browser_control / screen_click（§11.1/11.3）。
 /// </summary>
-public sealed class AppToolbox
+public sealed partial class AppToolbox
 {
     private readonly Func<Task>? _onScreenshotTranslate;
     private readonly AiService? _ai;
@@ -43,7 +43,7 @@ public sealed class AppToolbox
         // 任务型工具记入「最近操作」（save_skill 沉淀用；meta 工具与回放不记）
         // open_found 依赖会话内的搜索结果状态，回放不可复现，不记录
         int recIdx = -1;
-        if (_recording && name is "open_app" or "insert_text" or "edit_text" or "run_command" or
+        if (_recording && name is "open_app" or "app_action" or "insert_text" or "edit_text" or "run_command" or
             "web_search" or "open_url" or "window_control" or "media_control" or "read_clipboard" or
             "find_file" or "browser_control" or "screen_click" or "press_keys" or "mouse_action" or
             "system_control" or "rename_selected")
@@ -70,6 +70,8 @@ public sealed class AppToolbox
                         var r = await OpenAppAsync(appName);
                         return (r.Item1, r.Item2, false);
                     }
+                case "app_action":
+                    return await AppActionAsync(argsJson, ct);
                 case "screenshot_translate":
                     if (_onScreenshotTranslate == null) return (false, "截图翻译功能不可用", false);
                     await _onScreenshotTranslate();
@@ -482,7 +484,8 @@ public sealed class AppToolbox
     /// 记忆按「目标文字 + 前台应用」隔离——确认/取消/关闭这类通用按钮每个软件位置都
     /// 不一样，跨应用复用会点错；虚拟屏布局变化或换了应用都视为失效重新视觉定位。
     /// </summary>
-    private async Task<(bool, string, bool)> ScreenClickAsync(string argsJson, CancellationToken ct)
+    private async Task<(bool, string, bool)> ScreenClickAsync(
+        string argsJson, CancellationToken ct, bool remember = true)
     {
         if (_ai == null) return (false, "屏幕点击功能不可用", false);
         string target = GetArg(argsJson, "target").Trim();
@@ -509,7 +512,7 @@ public sealed class AppToolbox
         var vs = SystemInformation.VirtualScreen;
         string screenSig = $"{vs.Left},{vs.Top},{vs.Width},{vs.Height}";
         string fgApp = ForegroundApp();
-        if (fgApp.Length > 0 &&
+        if (remember && fgApp.Length > 0 &&
             LoadClickPoints().TryGetValue(NormKey(target) + "@" + fgApp, out var cp) &&
             cp.Screen == screenSig)
         {
@@ -533,7 +536,7 @@ public sealed class AppToolbox
         int cy = vs.Top + (int)((nums[1] + nums[3]) / 2 / 1000.0 * vs.Height);
 
         ClickAt(cx, cy);
-        SaveClickPoint(target, cx, cy);   // 记住这次的位置（按前台应用隔离），下次同应用直接点
+        if (remember) SaveClickPoint(target, cx, cy);   // 只缓存位置固定的控件，搜索结果这类会变的位置不缓存
         return await Clicked(remembered: false);
     }
 
@@ -1443,7 +1446,9 @@ public sealed class AppToolbox
         if (!SetClipboardText(text)) return (false, "剪贴板被别的程序占用了，没能写入");
         await Task.Delay(80);
         SendKey(VK_V, ctrl: true);
-        await Task.Delay(120);
+        // Electron/Chromium 客户端（抖音、QQ音乐等）读取剪贴板有延迟，
+        // 太早恢复会让粘贴变成空内容；450ms 实测能稳定读入。
+        await Task.Delay(450);
         RestoreClipboard(backup);
         return (true, "已经把内容贴到光标处了");
     }
@@ -1621,8 +1626,21 @@ public sealed class AppToolbox
     /// <summary>向当前前台窗口发一次按键（可选 Ctrl/Shift/Alt/Win 修饰），随后短暂等待让目标应用消化。</summary>
     private static void SendKey(ushort vk, bool ctrl = false, bool shift = false, bool alt = false, bool win = false)
     {
-        var seq = BuildKeySeq(vk, ctrl, shift, alt, win, out var _, out var _);
-        SendKeyInputs(seq);
+        var seq = BuildKeySeq(vk, ctrl, shift, alt, win, out var downSeq, out var upSeq);
+        if (downSeq.Count > 1)
+        {
+            // 修饰键和主键分开注入：Chromium/Electron 客户端（抖音、QQ音乐等）
+            // 对同一批里的 Ctrl+V 可能直接丢弃，中间留几十毫秒才稳定。
+            SendKeyInputs(downSeq.GetRange(0, downSeq.Count - 1));
+            Thread.Sleep(40);
+            SendKeyInputs(new List<(ushort vk, bool down)> { (vk, true) });
+            Thread.Sleep(30);
+            SendKeyInputs(upSeq);
+        }
+        else
+        {
+            SendKeyInputs(seq);
+        }
         Thread.Sleep(30);
     }
 
