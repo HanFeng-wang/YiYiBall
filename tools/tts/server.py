@@ -24,7 +24,7 @@ import wave
 import struct
 import threading
 import asyncio
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # Edge 在线神经语音（微软官方，音质远超本地 ZipVoice 且稳定）：可用则作为首选引擎
 try:
@@ -33,6 +33,7 @@ except ImportError:
     edge_tts = None
 
 EDGE_VOICE = "zh-CN-XiaoyiNeural"   # 晓伊（年轻女声，与助手名「依依」对应）
+EDGE_TIMEOUT = 8.0                  # Edge 在线合成超时（秒），超时立即转本地 ZipVoice
 
 import numpy as np
 import sherpa_onnx
@@ -133,17 +134,17 @@ def init_tts():
 def synth(text: str) -> bytes:
     # ZipVoice 懒加载：只在 edge 失败、真正需要兜底时才加载（首次约 30-60s）
     global _tts
-    with _zip_lock:
+    with _zip_lock:   # 整个加载+推理串行化：sherpa-onnx 本地推理不适合并发调用
         if _tts is None:
             print("[tts] 首次兜底请求，开始加载 ZipVoice…", flush=True)
             init_tts()
-    gen = sherpa_onnx.GenerationConfig()
-    gen.reference_audio = _ref_audio
-    gen.reference_sample_rate = _ref_sr
-    gen.reference_text = _ref_text
-    gen.num_steps = 4
-    gen.extra = {"min_char_in_sentence": "30"}
-    audio = _tts.generate(text, gen)
+        gen = sherpa_onnx.GenerationConfig()
+        gen.reference_audio = _ref_audio
+        gen.reference_sample_rate = _ref_sr
+        gen.reference_text = _ref_text
+        gen.num_steps = 4
+        gen.extra = {"min_char_in_sentence": "30"}
+        audio = _tts.generate(text, gen)
     # float32 -> 16bit wav
     samples = np.clip(audio.samples, -1.0, 1.0)
     pcm = (samples * 32767).astype("<i2").tobytes()
@@ -169,32 +170,47 @@ def synth_edge(text: str) -> bytes:
                 buf.write(ch["data"])
         return buf.getvalue()
 
-    data = asyncio.run(_run())
+    try:
+        data = asyncio.run(asyncio.wait_for(_run(), timeout=EDGE_TIMEOUT))
+    except asyncio.TimeoutError as e:
+        raise RuntimeError(f"edge 合成超时（>{EDGE_TIMEOUT:.0f}s）") from e
     if len(data) < 200:
         raise RuntimeError(f"edge 合成结果过短：{len(data)} 字节")
     return data
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 30
+
     def log_message(self, fmt, *args):
         print("[tts]", fmt % args)
+
+    def _send_all(self, code, ctype, body):
+        # 本机网络过滤驱动会把「响应头」「响应体」两次 send 拆开时丢掉第二段，
+        # 这里把状态行+头+体合成一次 sendall，绕开该问题，也减少小包往返。
+        reason = {200: "OK", 404: "Not Found", 500: "Internal Server Error"}.get(code, "OK")
+        head = (
+            f"HTTP/1.0 {code} {reason}\r\n"
+            f"Content-Type: {ctype}\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            f"Connection: close\r\n\r\n"
+        ).encode("latin1")
+        try:
+            self.connection.sendall(head + body)
+        except Exception as e:
+            print(f"[tts] 回包失败：{e}")
+        self.close_connection = True
 
     def do_GET(self):
         if self.path == "/health":
             body = json.dumps({"ok": True, "ready": _tts is not None}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_all(200, "application/json", body)
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._send_all(404, "text/plain; charset=utf-8", b"not found")
 
     def do_POST(self):
         if self.path != "/tts":
-            self.send_response(404)
-            self.end_headers()
+            self._send_all(404, "text/plain; charset=utf-8", b"not found")
             return
         try:
             n = int(self.headers.get("Content-Length", 0))
@@ -212,22 +228,18 @@ class Handler(BaseHTTPRequestHandler):
                 data, ctype = synth(text), "audio/wav"
                 print(f"[tts] zipvoice 合成完成：{len(text)} 字 -> {len(data)} 字节")
 
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.send_header("Content-Length", str(len(data)))
-            self.end_headers()
-            self.wfile.write(data)
+            self._send_all(200, ctype, data)
         except Exception as e:
             print(f"[tts] 合成失败：{e}")
-            body = str(e).encode("utf-8")
-            self.send_response(500)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._send_all(500, "text/plain; charset=utf-8", str(e).encode("utf-8"))
 
 
 if __name__ == "__main__":
     # 不在启动时加载 ZipVoice（fp32/int8 实测有 native 崩溃风险，且加载拖慢就绪）：
     # 首选 Edge 常驻，ZipVoice 仅在 edge 失败时按需懒加载兜底
     print(f"[tts] 服务就绪（edge 优先）：http://127.0.0.1:{PORT}  （config.json 的 TtsCosyVoiceUrl 填 http://127.0.0.1:{PORT}）")
-    HTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
+    class _Server(ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    _Server(("127.0.0.1", PORT), Handler).serve_forever()
