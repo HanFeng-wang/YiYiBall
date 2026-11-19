@@ -251,6 +251,11 @@ public sealed partial class AppToolbox
 {
     private const string MessageGenerateSys = "你是消息代写助手。根据用户要求生成一条自然、简短、可直接发送的中文消息，只输出消息正文，不要解释。";
 
+    /// <summary>用户说“当前会话/当前窗口/这个联系人”时，不搜索联系人，直接使用现有聊天。</summary>
+    private static bool IsCurrentChatTarget(string contact) =>
+        Regex.IsMatch(contact, @"^(当前|这个).*(会话|聊天|窗口|联系人|用户)|^(current|this chat)$",
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private async Task<(bool ok, string detail, bool silent)> AppActionAsync(string argsJson, CancellationToken ct)
     {
         string action = GetArg(argsJson, "action").Trim().ToLowerInvariant();
@@ -259,6 +264,7 @@ public sealed partial class AppToolbox
         string message = GetArg(argsJson, "message").Trim();
         string instruction = GetArg(argsJson, "instruction").Trim();
         string query = GetArg(argsJson, "query").Trim();
+        if (IsCurrentChatTarget(contact)) contact = "当前会话";
         if (app.Length == 0 && action is "send_message" or "send" or "find_contact" or "open_chat" or "search_contact") app = "微信";
         var profile = AppActionProfiles.Find(app);
 
@@ -302,6 +308,11 @@ public sealed partial class AppToolbox
                 if (profile == null || !profile.IsChat)
                     return (false, "这个应用不是聊天应用，没法查找联系人", false);
                 if (contact.Length == 0) return (false, "没有说要找哪位联系人", false);
+                if (IsCurrentChatTarget(contact))
+                {
+                    var current = await ActivateAppAsync(profile, profile.Name, false, false, ct);
+                    return (current.ok, current.ok ? "已切到当前聊天窗口" : current.detail, false);
+                }
                 var r = await OpenChatAsync(profile, contact, ct);
                 return (r.ok, r.detail, false);
             }
@@ -369,6 +380,7 @@ public sealed partial class AppToolbox
         }
 
         IntPtr hwnd = FindAppWindow(profile);
+        bool newlyLaunched = hwnd == IntPtr.Zero;
         if (hwnd == IntPtr.Zero)
         {
             var opened = await OpenAppAsync(profile.LaunchName);
@@ -400,6 +412,11 @@ public sealed partial class AppToolbox
 
         if (!ForceForegroundWindow(hwnd))
             return (false, $"找到了「{display}」窗口，但 Windows 没允许我把它置前");
+
+        // 窗口句柄出现不等于界面已经可操作。刚启动的客户端常会先显示启动帧、
+        // 白屏或尚未完成渲染的搜索区；等它真正显示内容后再继续，避免搜索校验
+        // 在界面初始化阶段失败并误触发网页兜底。
+        await WaitForAppUiReadyAsync(profile, newlyLaunched, ct);
 
         if (advanceLauncher && profile.AutoAdvanceLauncher)
         {
@@ -605,7 +622,6 @@ public sealed partial class AppToolbox
                 if (check.ok) return await FinishSearchAsync();
                 lastFailure = check.detail;
                 attemptLog.Add("OCR校验:" + Truncate(check.detail, 18));
-                SendKey(0x1B);
             }
             else { lastFailure = pasted.Item2; attemptLog.Add("OCR输入:" + Truncate(pasted.Item2, 18)); }
         }
@@ -629,7 +645,6 @@ public sealed partial class AppToolbox
                     if (check.ok) return await FinishSearchAsync();
                     lastFailure = check.detail;
                     attemptLog.Add("顶部搜索区校验:" + Truncate(check.detail, 18));
-                    SendKey(0x1B);
                 }
             }
         }
@@ -642,9 +657,6 @@ public sealed partial class AppToolbox
         foreach (var (isKey, label) in entries)
         {
             ct.ThrowIfCancellationRequested();
-            SendKey(0x1B);
-            await Task.Delay(120, ct);
-
             if (isKey)
             {
                 var key = await PressKeysAsync(JsonSerializer.Serialize(new { keys = label }), ct);
@@ -676,7 +688,7 @@ public sealed partial class AppToolbox
 
             await Task.Delay(420, ct);
             var boxCheck = await VerifySearchQueryAsync(profile, query, ct);
-            if (!boxCheck.ok) { lastFailure = boxCheck.detail; attemptLog.Add($"{label}:{Truncate(boxCheck.detail, 18)}"); SendKey(0x1B); continue; }
+            if (!boxCheck.ok) { lastFailure = boxCheck.detail; attemptLog.Add($"{label}:{Truncate(boxCheck.detail, 18)}"); continue; }
             return await FinishSearchAsync();
         }
 
@@ -914,15 +926,17 @@ public sealed partial class AppToolbox
         var snap = await OcrWindowAsync(FindAppWindow(profile), ct);
         if (snap != null && needle.Length > 0)
         {
-            for (int attempt = 0; attempt < 2; attempt++)
+            for (int attempt = 0; attempt < 4; attempt++)
             {
                 string topText = string.Concat(snap.Lines
                     .Where(l => l.Y1 < snap.Height * 0.45)
                     .Select(l => NormOcr(l.Text)));
                 if (topText.Contains(needle)) return (true, "");
-                if (attempt == 0)
+                if (attempt < 3)
                 {
-                    await Task.Delay(450, ct);
+                    // 客户端刚打开时搜索框可能先出现、内容稍后才绘制；给 OCR 多轮机会，
+                    // 避免已经输入成功却因为界面还没稳定而被判为失败并触发网页兜底。
+                    await Task.Delay(450 + attempt * 350, ct);
                     snap = await OcrWindowAsync(FindAppWindow(profile), ct);
                     if (snap == null) break;
                 }
@@ -951,9 +965,10 @@ public sealed partial class AppToolbox
         var act = await ActivateAppAsync(profile, profile.Name, advanceLauncher: false, loginRequested: false, ct);
         if (!act.ok) return act;
 
-        SendKey(0x1B);
-        await Task.Delay(120, ct);
-        SendKey(0x46, ctrl: true);
+        // 不在开头盲按 Esc：微信/QQ 等聊天窗口里 Esc 可能直接关闭当前聊天窗口。
+        string searchKeys = profile.SearchKeys.Length > 0 ? profile.SearchKeys : "Ctrl+F";
+        var searchKey = await PressKeysAsync(JsonSerializer.Serialize(new { keys = searchKeys }), ct);
+        if (!searchKey.Item1) return (false, searchKey.Item2);
         await Task.Delay(220, ct);
         var pasted = await PasteToCursorAsync(contact);
         if (!pasted.Item1) return pasted;
@@ -969,22 +984,27 @@ public sealed partial class AppToolbox
     private async Task<(bool ok, string detail)> SendMessageAsync(
         AppActionProfile profile, string contact, string message, CancellationToken ct)
     {
-        var chat = await OpenChatAsync(profile, contact, ct);
+        bool currentChat = IsCurrentChatTarget(contact);
+        var chat = currentChat
+            ? await ActivateAppAsync(profile, profile.Name, false, false, ct)
+            : await OpenChatAsync(profile, contact, ct);
         if (!chat.ok) return chat;
+        string target = currentChat ? "当前聊天对象" : contact;
 
-        await FocusMessageInputAsync(profile, profile.Name, contact, ct, quiet: true);
+        // 聊天已经由 OpenChatAsync 打开；这里只聚焦输入框，不能再重复搜索一次。
+        await FocusMessageInputAsync(profile, profile.Name, "", ct, quiet: true);
         var pasted = await PasteToCursorAsync(message);
         if (!pasted.Item1) return (false, $"已打开聊天，但消息没能贴进输入框：{pasted.Item2}");
         await Task.Delay(320, ct);
 
-        var inputCheck = await VerifyMessageInInputAsync(contact, message, ct);
+        var inputCheck = await VerifyMessageInInputAsync(target, message, ct);
         if (!inputCheck.ok) return (false, "消息已经尝试粘贴，但没能确认它进入了聊天输入框，所以没有按发送键");
 
         SendKey(0x0D);
         await Task.Delay(700, ct);
-        var sent = await VerifyMessageSentAsync(contact, message, ct);
+        var sent = await VerifyMessageSentAsync(target, message, ct);
         return sent.ok
-            ? (true, $"已给「{contact}」发送消息：{Truncate(message.Replace('\n', ' '), 50)}")
+            ? (true, $"已给「{target}」发送消息：{Truncate(message.Replace('\n', ' '), 50)}")
             : (false, "消息已粘贴并按了发送键，但没能从屏幕上确认它已经发出，请你看一眼聊天窗口");
     }
 
@@ -994,7 +1014,7 @@ public sealed partial class AppToolbox
         if (profile == null) return (false, "没有识别出要操作的应用");
         var act = await ActivateAppAsync(profile, app, advanceLauncher: false, loginRequested: false, ct);
         if (!act.ok) return act;
-        if (contact.Length > 0)
+        if (contact.Length > 0 && !IsCurrentChatTarget(contact))
         {
             var chat = await OpenChatAsync(profile, contact, ct);
             if (!chat.ok) return chat;
@@ -1098,6 +1118,30 @@ public sealed partial class AppToolbox
             await Task.Delay(250, ct);
         }
         return false;
+    }
+
+    /// <summary>等待新窗口结束白屏/启动帧并稳定显示，给客户端留出初始化搜索区的时间。</summary>
+    private static async Task WaitForAppUiReadyAsync(
+        AppActionProfile profile, bool newlyLaunched, CancellationToken ct)
+    {
+        int timeoutMs = newlyLaunched ? 15000 : 5000;
+        long minReadyAt = newlyLaunched ? 2200 : 400;
+        var sw = Stopwatch.StartNew();
+        int stableSamples = 0;
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            ct.ThrowIfCancellationRequested();
+            IntPtr hwnd = FindAppWindow(profile);
+            bool ready = hwnd != IntPtr.Zero &&
+                GetForegroundWindow() == hwnd &&
+                !IsWindowVisuallyBlank(hwnd);
+            if (ready && sw.ElapsedMilliseconds >= minReadyAt)
+            {
+                if (++stableSamples >= 2) return;
+            }
+            else stableSamples = 0;
+            await Task.Delay(250, ct);
+        }
     }
 
     private async Task<bool> ClickLauncherButtonAsync(AppActionProfile profile, CancellationToken ct)

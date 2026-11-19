@@ -43,6 +43,8 @@ public sealed class VoiceSession : IDisposable
     private static readonly Regex AppActionIntent = new("发消息|发给|发微信|给.{1,12}发|联系人|聊天记录|置顶|最顶层|放.{0,6}(前面|顶层)|搜索.{0,20}(打开|播放)|搜.{0,20}(打开|播放)|抖音|优酷|爱奇艺|腾讯视频|QQ音乐|网易云|哔哩哔哩|小红书|原神|星穹铁道", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex PlayIntent = new("播放|放一下|放出来|放给我|听一下|听听|开始听|开始看|看视频|听歌", RegexOptions.Compiled);
     private static readonly Regex OpenResultIntent = new("第一条|第一个|首个|第一个结果|第一条结果|点开|打开.{0,8}结果|播放", RegexOptions.Compiled);
+    // 只有用户明确要求关闭/退出时，才允许关闭窗口或发送 Alt+F4，防止执行其他任务时误关应用。
+    private static readonly Regex CloseWindowIntent = new("关闭|关掉|关了|关一下|关窗口|关应用|退出|结束|终止|杀掉|(?i:alt\\s*\\+?\\s*f4)", RegexOptions.Compiled);
     // 澄清等待中用户改主意：取消待执行指令
     private static readonly Regex CancelWord = new("算了|不用了|不要了|取消", RegexOptions.Compiled);
 
@@ -574,6 +576,20 @@ public sealed class VoiceSession : IDisposable
                 return (false, "", "app_action", "你想找哪位联系人或群聊呢？", false);
             if (app.Length == 0 && action is "" or "open" or "activate" or "bring_to_front" or "topmost" or "focus" or "login" or "search")
                 return (false, "", "app_action", "你想操作哪个应用呢？", false);
+        }
+
+        // 防止模型在“发消息/搜索”等任务后顺手关掉目标应用：非明确关闭指令一律拦截。
+        if (!CloseWindowIntent.IsMatch(text))
+        {
+            if (toolName == "window_control" &&
+                ExtractArgsString(argsJson, "action").Equals("close", StringComparison.OrdinalIgnoreCase))
+                return (false, "", toolName, "这条指令不是要关闭窗口，我已阻止误关闭。需要关闭时请明确说“关闭”或“关掉”。", false);
+            if (toolName == "press_keys" &&
+                Regex.IsMatch(ExtractArgsString(argsJson, "keys"), @"(?i)alt\s*\+?\s*f4"))
+                return (false, "", toolName, "这条指令不是要关闭窗口，我已阻止 Alt+F4 误关闭。需要关闭时请明确说“关闭”或“关掉”。", false);
+            if (toolName == "run_command" &&
+                Regex.IsMatch(ExtractArgsString(argsJson, "command"), @"(?i)\b(taskkill(?:\.exe)?|stop-process|kill)\b"))
+                return (false, "", toolName, "这条指令不是要关闭程序，我已阻止结束进程。需要关闭时请明确说“关闭”或“结束程序”。", false);
         }
 
         if (toolName.Length == 0)

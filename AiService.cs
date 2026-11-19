@@ -584,7 +584,7 @@ public sealed class AiService
         const string sys = """
             你是电脑操作任务规划器。根据用户指令输出一个 JSON 对象，格式二十三选一：
             打开应用（未知应用或只需启动） {"action":"open_app","args":{"name":"应用名"}}；
-            应用语义操作（优先用于打开/切到/置顶微信、抖音、优酷、QQ音乐、原神等已知日常应用，应用内搜索，按用户明确要求打开/播放搜索结果，查找联系人，发消息。只说搜索、没说打开或播放时用 search，绝不能自作主张用 search_play） {"action":"app_action","args":{"action":"open|activate|search|search_open|search_play|find_contact|send_message|focus_input","app":"应用名，发消息没说应用时默认微信","query":"应用内搜索词（否则为空串）","contact":"联系人（否则为空串）","message":"要发送的正文（否则为空串）","instruction":"让助手代写消息的要求（否则为空串）"}}；
+            应用语义操作（优先用于打开/切到/置顶微信、抖音、优酷、QQ音乐、原神等已知日常应用，应用内搜索，按用户明确要求打开/播放搜索结果，查找联系人，发消息。只说搜索、没说打开或播放时用 search，绝不能自作主张用 search_play；用户说当前会话/当前窗口/这个联系人时 contact 填“当前会话”，不要搜索） {"action":"app_action","args":{"action":"open|activate|search|search_open|search_play|find_contact|send_message|focus_input","app":"应用名，发消息没说应用时默认微信","query":"应用内搜索词（否则为空串）","contact":"联系人（否则为空串；当前聊天填“当前会话”）","message":"要发送的正文（否则为空串）","instruction":"让助手代写消息的要求（否则为空串）"}}；
             截图翻译 {"action":"screenshot_translate","args":{}}；
             在光标处输入或生成文字 {"action":"insert_text","args":{"text":"用户原话里说好的内容（没说则为空串）","instruction":"要生成什么内容的描述（用户直接给了内容则为空串）"}}；
             修改文字（润色/改写/翻译/替换） {"action":"edit_text","args":{"instruction":"改写要求","file":"用户提到的文件路径（没有则为空串）","line":行号数字（没提行号则为 0）}}；
@@ -657,7 +657,7 @@ public sealed class AiService
                     description = "对日常桌面应用做语义化操作：打开并置前、在应用内搜索、按用户明确要求打开或播放第一条搜索结果、查找联系人和发送消息。" +
                         "抖音/爱奇艺/优酷/腾讯视频/QQ音乐/网易云音乐/哔哩哔哩等客户端存在时优先在客户端搜索，未安装时自动回退到对应网页搜索。" +
                         "原神、崩坏星穹铁道等游戏会自动处理启动器的“进入游戏/开始游戏/进入/启动”按钮并校验真正进入。" +
-                        "微信/QQ/钉钉/飞书发消息会先搜索并视觉确认联系人，再编辑输入框和发送；联系人无法确认时不会发送。" +
+                        "微信/QQ/钉钉/飞书发消息会先搜索并视觉确认联系人，再编辑输入框和发送；联系人无法确认时不会发送。用户说当前会话/当前窗口/这个联系人时 contact 填“当前会话”，直接使用现有聊天，不要搜索联系人。" +
                         "用户说“打开/切到/把某应用放到最顶层/在抖音搜什么/给某人发消息”时优先使用。登录二维码、扫码或密码仍需用户本人确认。",
                     parameters = new
                     {
@@ -667,7 +667,7 @@ public sealed class AiService
                             action = new { type = "string", description = "open|activate|search|search_open|search_play|find_contact|send_message|focus_input。打开或置前用 activate；只搜索、不打开也不播放用 search；用户明确说打开第一条结果才用 search_open；用户明确说播放才用 search_play；聊天应用找联系人用 find_contact；发消息用 send_message。没说播放绝不调用 search_play" },
                             app = new { type = "string", description = "应用名，如 微信、抖音、优酷、原神、爱奇艺、QQ音乐。发消息没说应用时默认微信" },
                             query = new { type = "string", description = "应用内搜索词，仅 search 使用" },
-                            contact = new { type = "string", description = "联系人、群聊或对方名称，聊天操作使用" },
+                            contact = new { type = "string", description = "联系人、群聊或对方名称；用户说当前会话/当前窗口/这个联系人时填“当前会话”" },
                             message = new { type = "string", description = "要发送的消息正文；用户直接说了内容就原样填入" },
                             instruction = new { type = "string", description = "让助手代写消息的要求；只有用户没直接给出正文时才填，否则为空" }
                         },

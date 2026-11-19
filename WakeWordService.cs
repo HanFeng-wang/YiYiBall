@@ -17,8 +17,14 @@ public sealed class WakeWordService : IDisposable
     public event Action? OnWakeDetected;
 
     private const int SampleRate = 16000;
-    private const float KeywordsThreshold = 0.18f;   // 0.25 实测召回偏低（喊 2-3 次才中 1 次）
+    private const float KeywordsThreshold = 0.35f;   // 仅保留完整唤醒词并收紧阈值，降低环境语音误触
     private const float KeywordsScore = 1.5f;
+
+    // 只接受完整唤醒词；即使旧词表残留，也不会被「小依」「依依」等短词误唤醒。
+    private static readonly HashSet<string> AllowedKeywords = new(StringComparer.Ordinal)
+    {
+        "小依小依", "hey_xiaoyi", "hi_xiaoyi"
+    };
 
     private readonly AppConfig _cfg;
     private volatile bool _running;
@@ -147,13 +153,20 @@ public sealed class WakeWordService : IDisposable
                 {
                     _kws.Decode(_stream);
                     var result = _kws.GetResult(_stream);
-                    if (result.Keyword == string.Empty) continue;
+                    var keyword = (result.Keyword ?? "").Trim().TrimStart('@');
+                    if (keyword.Length == 0) continue;
+
+                    if (!AllowedKeywords.Contains(keyword))
+                    {
+                        _kws.Reset(_stream);
+                        continue;
+                    }
 
                     // 命中：立即重置流（防连触），防抖 3s
                     _kws.Reset(_stream);
                     if (Environment.TickCount64 - _lastWakeTick < 3000) break;
                     _lastWakeTick = Environment.TickCount64;
-                    TryLog("命中唤醒词：" + result.Keyword);
+                    TryLog("命中唤醒词：" + keyword);
                     // 命中提示音在工作线程立即播：唤醒路径此前"没有音效"即因音效排在
                     // UI 侧会话启动逻辑之后，时序上不可靠；独立于 UI 立即反馈
                     PromptSounds.PlayIn();
