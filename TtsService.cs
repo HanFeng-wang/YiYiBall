@@ -13,7 +13,7 @@ namespace ScreenTranslator;
 /// </summary>
 public sealed class TtsService : IDisposable
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(120) };
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
     private SpeechSynthesizer? _synth;
     private readonly object _lock = new();
     private readonly AppConfig _cfg;
