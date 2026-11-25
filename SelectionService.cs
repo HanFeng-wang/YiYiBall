@@ -17,7 +17,8 @@ public sealed class SelectionService : IDisposable
     private MouseHook.POINT _downPt;
     private DateTime _downTime;
     private bool _dblClk;
-    private bool _capturing;
+    private int _capturing;
+    private readonly bool _enabled;
 
     [DllImport("user32.dll")]
     private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
@@ -57,6 +58,16 @@ public sealed class SelectionService : IDisposable
     private const uint KEYEVENTF_KEYUP = 0x0002;
     private const ushort VK_CONTROL = 0x11;
     private const ushort VK_C = 0x43;
+    private const int VK_SHIFT = 0x10;
+    private const int VK_MENU = 0x12;
+    private const int VK_LWIN = 0x5B;
+    private const int VK_RWIN = 0x5C;
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetClipboardSequenceNumber();
 
     // 本应用窗口内不参与划词判定（选中面板里的文字、面板内单击等都是自家交互，不是划词手势）
     [DllImport("user32.dll")]
@@ -85,16 +96,17 @@ public sealed class SelectionService : IDisposable
         catch { return false; }
     }
 
-    public SelectionService(MouseHook hook)
+    public SelectionService(MouseHook hook, bool enabled = true)
     {
         _hook = hook;
+        _enabled = enabled;
         _hook.OnMouse += OnMouse;
     }
 
     private void OnMouse(MouseHook.MouseMsg msg, MouseHook.POINT pt)
     {
         // 本应用窗口内：不触发划词捕获、不模拟 Ctrl+C、不触发"无选区"消球
-        if (IsInsideOwnWindow(pt)) return;
+        if (!_enabled || IsInsideOwnWindow(pt)) return;
         switch (msg)
         {
             case MouseHook.MouseMsg.Down:
@@ -111,7 +123,7 @@ public sealed class SelectionService : IDisposable
                 {
                     var elapsed = (DateTime.UtcNow - _downTime).TotalMilliseconds;
                     if (elapsed > 80 && elapsed < 3000)
-                        ScheduleCapture(pt);
+                        ScheduleCapture(pt, GetClipboardSequenceNumber());
                 }
                 else if (!_dblClk)
                 {
@@ -123,15 +135,22 @@ public sealed class SelectionService : IDisposable
         }
     }
 
-    private void ScheduleCapture(MouseHook.POINT pt)
+    private void ScheduleCapture(MouseHook.POINT pt, uint clipboardSeqAtSelection)
     {
-        if (_capturing) return;
-        _capturing = true;
+        if (Interlocked.Exchange(ref _capturing, 1) != 0) return;
         Task.Run(async () =>
         {
             try
             {
-                await Task.Delay(220);
+                // 给目标窗口留下处理鼠标选区的时间，也给用户自己按 Ctrl+C 的机会。
+                await Task.Delay(260);
+
+                // 用户已经复制过，或应用已自行更新剪贴板：此时强行注入 Ctrl+C 只会制造竞态。
+                if (GetClipboardSequenceNumber() != clipboardSeqAtSelection) return;
+                if (HasRecentCommandModifierActivity()) return;
+                if (!await WaitForPhysicalModifiersReleasedAsync(700)) return;
+                if (GetClipboardSequenceNumber() != clipboardSeqAtSelection) return;
+
                 var text = await CaptureAsync();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
@@ -142,9 +161,40 @@ public sealed class SelectionService : IDisposable
             }
             finally
             {
-                _capturing = false;
+                Interlocked.Exchange(ref _capturing, 0);
             }
         });
+    }
+
+    /// <summary>物理修饰键仍被按住时绝不注入 Ctrl+C，避免覆盖真实 Ctrl+C/Ctrl+V 的按键状态。</summary>
+    private static async Task<bool> WaitForPhysicalModifiersReleasedAsync(int timeoutMs)
+    {
+        int waited = 0;
+        while (HasPhysicalModifierDown())
+        {
+            if (waited >= timeoutMs) return false;
+            await Task.Delay(25);
+            waited += 25;
+        }
+        return true;
+    }
+
+    private static bool HasPhysicalModifierDown() =>
+        (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0 ||
+        (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0 ||
+        (GetAsyncKeyState(VK_MENU) & 0x8000) != 0 ||
+        (GetAsyncKeyState(VK_LWIN) & 0x8000) != 0 ||
+        (GetAsyncKeyState(VK_RWIN) & 0x8000) != 0;
+
+    /// <summary>刚按过 Ctrl/Alt/Win 时不接管，优先让用户自己的复制/粘贴快捷键正常完成。</summary>
+    private static bool HasRecentCommandModifierActivity()
+    {
+        foreach (int vk in new[] { VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN })
+        {
+            short state = GetAsyncKeyState(vk);
+            if ((state & 0x8000) != 0 || (state & 0x0001) != 0) return true;
+        }
+        return false;
     }
 
     private static bool HasContent(string s)
@@ -155,7 +205,7 @@ public sealed class SelectionService : IDisposable
         return false;
     }
 
-    /// <summary>在专用 STA 线程上执行：保存剪贴板 → Ctrl+C → 读取 → 恢复剪贴板。</summary>
+    /// <summary>在专用 STA 线程上执行：Ctrl+C → 读取 → 仅在剪贴板仍归本次捕获时恢复。</summary>
     private static Task<string?> CaptureAsync()
     {
         var tcs = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -173,22 +223,36 @@ public sealed class SelectionService : IDisposable
     {
         string? backup = null;
         bool hadClip = false;
+        bool hadText = false;
         try
         {
             if (Clipboard.ContainsText())
             {
                 backup = Clipboard.GetText();
                 hadClip = true;
+                hadText = true;
             }
             else
             {
-                Clipboard.Clear();
+                hadClip = Clipboard.GetDataObject() != null;
             }
         }
         catch { /* 剪贴板被占用时忽略 */ }
 
-        SendCtrlC();
-        Thread.Sleep(300);
+        uint seqBefore = GetClipboardSequenceNumber();
+        if (!SendCtrlC()) return null;
+
+        uint seqAfter = seqBefore;
+        for (int i = 0; i < 28; i++)        // 最多等约 700ms，兼容 Chromium/Electron 与 Office
+        {
+            Thread.Sleep(25);
+            seqAfter = GetClipboardSequenceNumber();
+            if (seqAfter != seqBefore) break;
+        }
+        if (seqAfter == seqBefore) return null;   // 无选区：不改动用户现有剪贴板
+
+        // 用户已再次操作剪贴板（例如紧接着 Ctrl+C/Ctrl+V），不要在此时恢复旧值。
+        if (HasPhysicalModifierDown() || GetClipboardSequenceNumber() != seqAfter) return null;
 
         string? result = null;
         try
@@ -202,12 +266,13 @@ public sealed class SelectionService : IDisposable
         }
         catch { }
 
-        // 恢复原剪贴板
+        // 仅在剪贴板没有发生后续变化时恢复；避免把用户刚复制的新内容覆盖掉。
+        if (GetClipboardSequenceNumber() != seqAfter) return result;
         try
         {
-            if (hadClip && backup != null)
+            if (hadText && backup != null)
                 Clipboard.SetText(backup);
-            else
+            else if (!hadClip)
                 Clipboard.Clear();
         }
         catch { }
@@ -215,7 +280,7 @@ public sealed class SelectionService : IDisposable
         return result;
     }
 
-    private static void SendCtrlC()
+    private static bool SendCtrlC()
     {
         var inputs = new INPUT[4];
         // Ctrl down
@@ -232,7 +297,19 @@ public sealed class SelectionService : IDisposable
         inputs[3].type = INPUT_KEYBOARD;
         inputs[3].U.ki.wVk = VK_CONTROL;
         inputs[3].U.ki.dwFlags = KEYEVENTF_KEYUP;
-        SendInput((uint)inputs.Length, inputs, INPUT.Size);
+        uint sent = SendInput((uint)inputs.Length, inputs, INPUT.Size);
+        if (sent == inputs.Length) return true;
+
+        // SendInput 被系统部分拒绝时清理可能已经落下的按键，不让 Ctrl 残留。
+        var releases = new INPUT[2];
+        releases[0].type = INPUT_KEYBOARD;
+        releases[0].U.ki.wVk = VK_C;
+        releases[0].U.ki.dwFlags = KEYEVENTF_KEYUP;
+        releases[1].type = INPUT_KEYBOARD;
+        releases[1].U.ki.wVk = VK_CONTROL;
+        releases[1].U.ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput((uint)releases.Length, releases, INPUT.Size);
+        return false;
     }
 
     public void Dispose() => _hook.OnMouse -= OnMouse;

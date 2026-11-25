@@ -102,7 +102,7 @@ internal static class Program
         _ = ui.Handle; // 强制创建窗口句柄，否则 BeginInvoke 会抛异常（discard，避免占用 _ 标识符）
 
         using var hook = new MouseHook();
-        var selection = new SelectionService(hook);
+        var selection = new SelectionService(hook, cfg.CaptureSelectedText);
         MainBallForm? ball = null;
         AssistBallForm? assist = null;
         MainWindowForm? main = null;

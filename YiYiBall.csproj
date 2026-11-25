@@ -12,7 +12,7 @@
     <ApplicationIcon>yiyiball.ico</ApplicationIcon>
     <AssemblyTitle>依依灵球 YiYi Ball</AssemblyTitle>
     <Product>依依灵球 YiYi Ball</Product>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>false</InvariantGlobalization>

@@ -13,6 +13,7 @@ public sealed class AppConfig
     public string OcrModel { get; set; } = "qwen-vl-ocr";   // 截图文字识别模型（多模态 OCR）
     public string TitleModel { get; set; } = "tongyi-xiaomi-analysis-flash"; // 会话标题生成模型（截图翻译专用）
     public bool AutoSpeak { get; set; } = true;
+    public bool CaptureSelectedText { get; set; } = true;   // 划词后自动模拟 Ctrl+C 取词；可关闭以避免与复制快捷键冲突
     public bool ShowScreenshotTip { get; set; } = true;     // 截图时是否显示操作引导提示
     public bool AutoStart { get; set; } = true;             // 开机自动启动（HKCU Run 注册表项）
     public int HistoryLimit { get; set; } = 500;

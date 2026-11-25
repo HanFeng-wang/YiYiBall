@@ -233,6 +233,7 @@ public sealed class SettingsWindowForm : Form
         ocrModel = _cfg.OcrModel,
         titleModel = _cfg.TitleModel,
         autoSpeak = _cfg.AutoSpeak,
+        captureSelectedText = _cfg.CaptureSelectedText,
         showScreenshotTip = _cfg.ShowScreenshotTip,
         autoStart = _cfg.AutoStart,
         hotkeys = _cfg.Hotkeys,
@@ -289,6 +290,8 @@ public sealed class SettingsWindowForm : Form
         if (titleModel.Length > 0) _cfg.TitleModel = titleModel;   // 留空时保留现有值，避免清空导致标题生成失败
         if (root.TryGetProperty("autoSpeak", out var sp))
             _cfg.AutoSpeak = sp.ValueKind == JsonValueKind.True;
+        if (root.TryGetProperty("captureSelectedText", out var cst))
+            _cfg.CaptureSelectedText = cst.ValueKind == JsonValueKind.True;
         if (root.TryGetProperty("showScreenshotTip", out var st))
             _cfg.ShowScreenshotTip = st.ValueKind == JsonValueKind.True;
         if (root.TryGetProperty("autoStart", out var au) &&

@@ -292,7 +292,7 @@
     <div class="nav-item" data-page="about">关于</div>
     <div class="nav-item" data-page="shortcuts">快捷键</div>
 
-    <div id="nav-foot">v1.1.0</div>
+    <div id="nav-foot">v1.1.1</div>
   </aside>
 
   <main id="content">
@@ -446,6 +446,13 @@
       <section class="page" data-page="translate">
         <div class="card">
           <div class="card-title">划词行为</div>
+          <div class="row">
+            <div class="info">
+              <div class="t">选中文字后自动捕捉</div>
+              <div class="d">在外部应用划词后自动取词；关闭后不会注入 Ctrl+C，复制和粘贴不再受划词功能干扰</div>
+            </div>
+            <div class="ctl"><div class="switch" id="captureSelectedText"></div></div>
+          </div>
           <div class="row">
             <div class="info">
               <div class="t">选中后自动发音</div>
@@ -661,7 +668,7 @@
           <div class="card-title">关于</div>
           <div class="row">
             <div class="info"><div class="t">版本</div></div>
-            <div class="ctl"><span class="about-val">1.1.0</span></div>
+            <div class="ctl"><span class="about-val">1.1.1</span></div>
           </div>
           <div class="row">
             <div class="info">
@@ -714,6 +721,7 @@
     $('#ocrModel').value = c.ocrModel || '';
     $('#titleModel').value = c.titleModel || '';
     $('#autoSpeak').classList.toggle('on', !!c.autoSpeak);
+    $('#captureSelectedText').classList.toggle('on', c.captureSelectedText !== false);
     $('#screenshotTip').classList.toggle('on', !!c.showScreenshotTip);
     $('#autoStart').classList.toggle('on', c.autoStart !== false);   // 默认勾选（旧配置无此字段时视为开启）
     $('#historyLimit').textContent = c.historyLimit;
@@ -759,6 +767,7 @@
   }
 
   $('#autoSpeak').addEventListener('click', (e) => e.target.classList.toggle('on'));
+  $('#captureSelectedText').addEventListener('click', (e) => e.target.classList.toggle('on'));
   $('#screenshotTip').addEventListener('click', (e) => e.target.classList.toggle('on'));
   $('#autoStart').addEventListener('click', (e) => e.target.classList.toggle('on'));
   $('#autoSpeakReply').addEventListener('click', (e) => e.target.classList.toggle('on'));
@@ -975,6 +984,7 @@
       ocrModel: $('#ocrModel').value,
       titleModel: $('#titleModel').value,
       autoSpeak: $('#autoSpeak').classList.contains('on'),
+      captureSelectedText: $('#captureSelectedText').classList.contains('on'),
       showScreenshotTip: $('#screenshotTip').classList.contains('on'),
       autoStart: $('#autoStart').classList.contains('on'),
       hotkeys: {
